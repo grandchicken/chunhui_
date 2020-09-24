@@ -251,9 +251,11 @@ class BilibiliVideo(object):
         connection.close()
         b = b_project_data.connect_mysql(db='b_project')
         table = 'bilibili_video_info'
-        sql = "update %s set flag = 1"%table
+        print('start_url:',start_url)
+        sql = "update %s set flag = 1 where video_url = '%s'"%(table,start_url)
         cursor = b.db.cursor()
         cursor.execute(sql)
+        b.db.commit()
         b.close_db()
         return
 
