@@ -54,7 +54,7 @@ class connect_mysql():
 
         pass
 
-class crawl_biliob():
+class Biliob():
     def __init__(self):
         self.start_url = 'https://www.biliob.com/rank/fans-increase/'
         self.db = 'b_project'
@@ -120,9 +120,26 @@ class crawl_biliob():
             mysql = connect_mysql(db=self.db)
             mysql.inject_mysql(self.table, item)
 
+    def load_biliob_data(self ,date=time.strftime("%Y-%m-%d", time.localtime())):
+        sql = 'select space_url from %s where date = "%s"' % (self.table, str(date))
+        db_connect = connect_mysql(db='b_project')
+        results = db_connect.get_mysqldata(sql)
+        if (len(results) == 0):
+            print('数据库中没有你要的数据！,将返回空列表')
+
+        # 加入待处理表中
+        urls = []
+        for r in results:
+            url = r[0] + '/video?'
+            # print(url)
+            urls.append(url)
+        return urls
 from urllib.parse import urlencode
-class crawl_bilibili():
-    def __init__(self,base_table,video_table):
+
+
+class BilibiliMain():
+    def __init__(self,base_table = 'bilibili_base_info',video_table = 'bilibili_video_info'):
+        import time
         # self.base_urls = base_urls
         self.lock = threading.Lock()
         self.base_table = base_table
@@ -134,10 +151,14 @@ class crawl_bilibili():
         chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Safari/537.36')
         chrome_options.add_argument('--headless')
 
-        chrome_options.add_argument(
-            '--proxy-server=http://proxy:orderId=O20091914563879906967&time=1600705092&sign=21e4e71bce73c337603c357a19eb8412&pid=0&cid=0&uid=&sip=0&nd=0@flow.hailiangip.com:14223')
+        # chrome_options.add_argument(
+        #     '--proxy-server=http://proxy:orderId=O20091914563879906967&time=1600705092&sign=21e4e71bce73c337603c357a19eb8412&pid=0&cid=0&uid=&sip=0&nd=0@flow.hailiangip.com:14223')
         self.browser = webdriver.Chrome(options=chrome_options)
+
         pass
+
+
+
     def load_cookies(self):
         import json
 
@@ -168,13 +189,25 @@ class crawl_bilibili():
         for base_url in self.base_urls:
             self.crawl_one(base_url)
     def crawl_one(self,base_url):
+        #去重
+        db_connect = connect_mysql(db='b_project')
+        user_id = base_url.split('/')[-2]
+        sql = 'select * from %s where user_id = "%s"' % (self.base_table,user_id )
+        # sql = 'select space_url from %s where id BETWEEN 2 and 6'
+        results = db_connect.get_mysqldata(sql)
+        print('results:',results)
+        if(len(results) == 1):
+            print('数据已存储')
+            return
+
+
         if self.init_time == True:
             self.load_cookies()
             self.init_time = False
 
 
         wait = WebDriverWait(self.browser, 30)
-        db_connect = connect_mysql(db='b_project')
+
 
         self.browser.get(base_url)
 
@@ -203,7 +236,10 @@ class crawl_bilibili():
 
         read_num = right_div.find_element_by_css_selector('.n-data:nth-child(5) > #n-bf').text
         item_base = OrderedDict()
-        user_id = base_url.split('/')[-2]
+
+
+
+
         item_base['user_id'] = user_id
         item_base['video_num'] = video_num
         item_base['concerns_num'] = concerns_num
@@ -264,98 +300,143 @@ class crawl_bilibili():
         time.sleep(1.5)
         # print('href:',href)
         # print('time:',time)
-def spread_thread(urls,thread_num):
+    def load_bilibili_data(self,sql = 'SELECT video_url FROM bilibili_video_info where flag = 0'):
+        c = connect_mysql(db='b_project')
+        raw_urls = c.get_mysqldata(sql)
+        urls = []
+        for url in raw_urls:
+            urls.append(url[0])
+        return urls
 
-    urls_group = [[] for x in range(thread_num)]
-    for i in range(len(urls)):
-        urls_group[i%thread_num].append(urls[i])
-    return urls_group
-
-
-def main_1():
-    b = crawl_biliob()
-    b.crawl()
+class ApplyMutiThread:
 
 
-def main_2():
-    start_time = time.time()
+    def spread_thread(self,urls = [],thread_num = 40):
+        if urls == []:
+            return None
+        else:
+            urls_group = [[] for x in range(thread_num)]
+            for i in range(len(urls)):
+                urls_group[i%thread_num].append(urls[i])
+            return urls_group
+    def apply_thread(self,urls = [],thread_num = 40):
+        base_table = 'bilibili_base_info'
+        video_table = 'bilibili_video_info'
+        urls_group = self.spread_thread(urls = urls, thread_num=thread_num)
+        if urls_group is None:
+            print('urls列表不存在！')
+            return
+        print(urls_group)
+        t_list = []
+        for i in range(thread_num):
+            B = BilibiliMain(video_table=video_table, base_table=base_table)
+            t = threading.Thread(target=B.crawl, args=(urls_group[i],))
+            print('线程%s设置完毕' % i)
+            t_list.append(t)
+        for t in t_list:
+            t.setDaemon(True)
+            t.start()
+        for t in t_list:
+            t.join()
 
-    base_table = 'bilibili_base_info'
-    video_table = 'bilibili_video_info'
-    table = 'biliob'
+
+# def main_1():
+#     b = Biliob()
+#     b.crawl()
+# def main_2():
+#     start_time = time.time()
+#
+#     base_table = 'bilibili_base_info'
+#     video_table = 'bilibili_video_info'
+#     table = 'biliob'
 
     #提取mysql数据
     # date = time.strftime("%Y-%m-%d", time.localtime())
-    date = '2020-09-21'
-    sql = 'select space_url from %s where date = "%s"'%(table,str(date))
-    # sql = 'select space_url from %s where id BETWEEN 2 and 6'
-    db_connect = connect_mysql(db='b_project')
-    results = db_connect.get_mysqldata(sql)
+#     date = '2020-09-21'
+#     sql = 'select space_url from %s where date = "%s"'%(table,str(date))
+#     # sql = 'select space_url from %s where id BETWEEN 2 and 6'
+#     db_connect = connect_mysql(db='b_project')
+#     results = db_connect.get_mysqldata(sql)
+#
+#     #加入待处理表中
+#     urls = []
+#     for r in results:
+#         url = r[0]+'/video?'
+#         print(url)
+#         urls.append(url)
+#
+#     B = BilibiliMain(video_table=video_table, base_table=base_table)
+#
+#     # #使用多线程
+#     # thread_num = 20
+#     #
+#     # urls_group = spread_thread(urls,thread_num)
+#     # for i in range(thread_num):
+#
+#
+#     B.crawl(base_urls=urls)
+#     end_time = time.time()
+#     print('用时：',end_time - start_time)
+#
+#
+# if __name__ == '__main__':
+#     # main_1()
+#     # main_2()
+#     start_time = time.time()
+#
+#     base_table = 'bilibili_base_info_test'
+#     video_table = 'bilibili_video_info_test'
+#     table = 'biliob'
+#
+#     #提取mysql数据
+#     # date = time.strftime("%Y-%m-%d", time.localtime())
+#     date = '2020-09-21'
+#     # sql = 'select space_url from %s where date = "%s"'%(table,str(date))
+#     sql = 'select space_url from %s where id BETWEEN 2 and 6' %table
+#     db_connect = connect_mysql(db='b_project')
+#     results = db_connect.get_mysqldata(sql)
+#
+#     #加入待处理表中
+#     urls = []
+#     for r in results:
+#         url = r[0]+'/video?'
+#         # print(url)
+#         urls.append(url)
+#
+#
+#
+#     #使用多线程
+#     thread_num = 5
+#
+#     urls_group = spread_thread(urls,thread_num = thread_num)
+#     print(urls_group)
+#     t_list = []
+#     for i in range(thread_num):
+#         B = BilibiliMain(video_table=video_table, base_table=base_table)
+#         t = threading.Thread(target=B.crawl,args=(urls_group[i],))
+#         print('线程%s设置完毕'%i)
+#         t_list.append(t)
+#     for t in t_list:
+#         t.setDaemon(True)
+#         t.start()
+#     for t in t_list:
+#         t.join()
+#
+#     # B.crawl(base_urls=urls)
+#     end_time = time.time()
+#     print('用时：',end_time - start_time)
 
-    #加入待处理表中
-    urls = []
-    for r in results:
-        url = r[0]+'/video?'
-        print(url)
-        urls.append(url)
 
-    B = crawl_bilibili(video_table=video_table, base_table=base_table)
 
-    # #使用多线程
-    # thread_num = 20
+
+    # db_connect = connect_mysql(db='b_project')
+    # base_table = 'bilibili_base_info'
+    # base_url ='https://space.bilibili.com/43222001/video?tid=0&page=28&keyword=&order=pubdate'
+    # user_id_2 = base_url.split('/')[-2]
+    # print(user_id_2)
     #
-    # urls_group = spread_thread(urls,thread_num)
-    # for i in range(thread_num):
-
-
-    B.crawl(base_urls=urls)
-    end_time = time.time()
-    print('用时：',end_time - start_time)
-
-
-if __name__ == '__main__':
-    # main_1()
-    # main_2()
-    start_time = time.time()
-
-    base_table = 'bilibili_base_info_test'
-    video_table = 'bilibili_video_info_test'
-    table = 'biliob'
-
-    #提取mysql数据
-    # date = time.strftime("%Y-%m-%d", time.localtime())
-    date = '2020-09-21'
-    sql = 'select space_url from %s where date = "%s"'%(table,str(date))
-    # sql = 'select space_url from %s where id BETWEEN 2 and 6'
-    db_connect = connect_mysql(db='b_project')
-    results = db_connect.get_mysqldata(sql)
-
-    #加入待处理表中
-    urls = []
-    for r in results:
-        url = r[0]+'/video?'
-        # print(url)
-        urls.append(url)
-
-
-
-    #使用多线程
-    thread_num = 40
-
-    urls_group = spread_thread(urls,thread_num)
-    print(urls_group)
-    t_list = []
-    for i in range(thread_num):
-        B = crawl_bilibili(video_table=video_table, base_table=base_table)
-        t = threading.Thread(target=B.crawl,args=(urls_group[i],))
-        print('线程%s设置完毕'%i)
-        t_list.append(t)
-    for t in t_list:
-        t.setDaemon(True)
-        t.start()
-    for t in t_list:
-        t.join()
-
-    # B.crawl(base_urls=urls)
-    end_time = time.time()
-    print('用时：',end_time - start_time)
+    # user_id = '14110780'
+    # sql = 'select * from %s where user_id = "%s"' % (base_table, user_id_2)
+    # # sql = 'select space_url from %s where id BETWEEN 2 and 6'
+    # results = db_connect.get_mysqldata(sql)
+    # print('results:', len(results))
